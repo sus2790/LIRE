@@ -26,7 +26,7 @@
 # 部屬
 
 ```py
-pip install req.txt
+pip install -r requirements.txt
 python main.py
 ```
 

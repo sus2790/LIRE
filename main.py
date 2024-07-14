@@ -280,7 +280,7 @@ trigger: bool = True
 
 @bot.event
 async def on_ready() -> None:
-    pass
+    print(bot.user)
 
 
 @bot.slash_command(description="提前讓我下班")
@@ -365,4 +365,4 @@ async def play(ctx, query: str) -> None:
     trigger = False
 
 
-bot.run(os.getenv("TOKEN"))
+bot.run(os.getenv('TOKEN'))
