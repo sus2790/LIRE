@@ -1,6 +1,5 @@
 import asyncio
 import contextlib
-import os
 import re
 
 import discord
@@ -188,6 +187,10 @@ class MusicQueue:
     def is_empty(self):
         return len(self.queue) == 0
 
+    def clear(self):
+        self.queue = []
+        self.now = 0
+
 
 def create_embed(ctx: discord.ApplicationContext, player, mode: str) -> discord.Embed:
     if mode == "error":
@@ -235,22 +238,31 @@ def create_embed(ctx: discord.ApplicationContext, player, mode: str) -> discord.
 
 
 async def play_next_song(ctx: discord.ApplicationContext) -> None:
-    player = queue.get_now_playing() if trigger is True else queue.get_next()
+    global trigger
+    player = queue.get_now_playing() if trigger else queue.get_next()
     if player:
         new_player, error = await YTDLSource.from_url(player.url, loop=bot.loop)
         if error:
             embed = create_embed(ctx, f"發生未預期的錯誤\n```{error}```", "error")
+            await ctx.respond(embed=embed)
             return
 
         if ctx.voice_client.is_playing():
             ctx.voice_client.stop()
 
         with contextlib.suppress(discord.errors.ClientException):
-            ctx.voice_client.play(new_player)
+            ctx.voice_client.play(
+                new_player,
+                after=lambda e: asyncio.run_coroutine_threadsafe(
+                    play_next_song(ctx),
+                    bot.loop,
+                ).result(),
+            )
+
+        trigger = False
     else:
-        embed = create_embed(self.ctx, "佇列中沒有下一首歌曲。", "error")
-        await ctx.respond(embed=embed)
-        return
+        embed = create_embed(ctx, "佇列中沒有下一首歌曲。", "error")
+        await ctx.send_followup(embed=embed)
 
 
 async def play_previous_song(ctx: discord.ApplicationContext) -> None:
@@ -258,18 +270,24 @@ async def play_previous_song(ctx: discord.ApplicationContext) -> None:
     if player:
         new_player, error = await YTDLSource.from_url(player.url, loop=bot.loop)
         if error:
-            create_embed(ctx, f"發生未預期的錯誤\n```{error}```", "error")
+            embed = create_embed(ctx, f"發生未預期的錯誤\n```{error}```", "error")
+            await ctx.respond(embed=embed)
             return
 
         if ctx.voice_client.is_playing():
             ctx.voice_client.stop()
 
         with contextlib.suppress(discord.errors.ClientException):
-            ctx.voice_client.play(new_player)
+            ctx.voice_client.play(
+                new_player,
+                after=lambda e: asyncio.run_coroutine_threadsafe(
+                    play_next_song(ctx),
+                    bot.loop,
+                ).result(),
+            )
     else:
-        embed = create_embed(self.ctx, "佇列中沒有上一首歌曲。", "error")
-        await ctx.respond(embed=embed)
-        return
+        embed = create_embed(ctx, "佇列中沒有上一首歌曲。", "error")
+        await ctx.send_followup(embed=embed)
 
 
 intents: discord.Intents = discord.Intents.all()
@@ -284,7 +302,7 @@ async def on_ready() -> None:
 
 
 @bot.slash_command(description="提前讓我下班")
-async def leave(ctx) -> None:
+async def leave(ctx: discord.ApplicationContext) -> None:
     global trigger
     if ctx.voice_client:
         embed = discord.Embed(
@@ -298,6 +316,7 @@ async def leave(ctx) -> None:
         )
         await ctx.respond(embed=embed)
         await ctx.voice_client.disconnect()
+        MusicQueue.clear()
         trigger = True
     else:
         embed = create_embed(ctx, "我還不在一個語音頻道。", "error")
@@ -305,12 +324,16 @@ async def leave(ctx) -> None:
 
 
 @bot.slash_command(description="看看我的延遲")
-async def ping(ctx) -> None:
+async def ping(ctx: discord.ApplicationContext) -> None:
     await ctx.respond(f"Pong! ({bot.latency*1000:.2f} ms)")
 
 
 @bot.slash_command(description="心情不好聽聽歌")
-async def play(ctx, query: str) -> None:
+async def play(
+    ctx: discord.ApplicationContext,
+    query: str,
+    controller: bool = False,
+) -> None:
     global trigger
     await ctx.defer()
     if not ctx.author.voice:
@@ -353,16 +376,16 @@ async def play(ctx, query: str) -> None:
     if not ctx.voice_client.is_playing():
         await play_next_song(ctx)
 
-    if trigger:
+    if trigger or controller:
         await ctx.respond(
             embed=create_embed(ctx, player, "controller"),
             view=Confirm(ctx),
         )
-    if not trigger:
+    else:
         await ctx.respond(
             embed=create_embed(ctx, player, "queue"),
         )
     trigger = False
 
 
-bot.run(os.getenv('TOKEN'))
+bot.run(os.getenv("TOKEN"))
