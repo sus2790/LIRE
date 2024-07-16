@@ -6,6 +6,7 @@ import re
 import discord
 import yt_dlp
 from dotenv import load_dotenv
+from Nueue.queue import Queue
 
 load_dotenv()
 
@@ -79,14 +80,14 @@ class Confirm(discord.ui.View):
         button: discord.ui.Button,
         interaction: discord.Interaction,
     ) -> None:
-        if not queue.get_source(True):
+        if not queue.source(True):
             embed = create_embed(self.ctx, "佇列中沒有上一首歌曲。", "error")
             await interaction.response.send_message(embed=embed)
             return
         if self.ctx.voice_client.is_playing():
             self.ctx.voice_client.stop()
         await play_previous_song(self.ctx)
-        embed = create_embed(self.ctx, queue.get_now_playing(), "queue")
+        embed = create_embed(self.ctx, queue.current_item(), "queue")
         await interaction.response.edit_message(embed=embed, view=self)
 
     @discord.ui.button(emoji="⏸️", style=discord.ButtonStyle.grey)
@@ -112,85 +113,15 @@ class Confirm(discord.ui.View):
         button: discord.ui.Button,
         interaction: discord.Interaction,
     ) -> None:
-        if not queue.get_source():
+        if not queue.source():
             embed = create_embed(self.ctx, "佇列中沒有下一首歌曲。", "error")
             await interaction.response.send_message(embed=embed)
             return
         if self.ctx.voice_client.is_playing():
             self.ctx.voice_client.stop()
         await play_next_song(self.ctx)
-        embed = create_embed(self.ctx, queue.get_now_playing(), "queue")
+        embed = create_embed(self.ctx, queue.current_item(), "queue")
         await interaction.response.edit_message(embed=embed, view=self)
-
-
-class MusicQueue:
-    def __init__(self) -> None:
-        self.queue = []
-        self.now = 0
-
-    def add_to_queue(self, song) -> None:
-        self.queue.append(song)
-
-    def get_next(self):
-        if not self.is_empty() and (
-            len(self.queue) != 1 or self.now < len(self.queue) - 1
-        ):
-            self.now += 1
-            try:
-                next_song = self.queue[self.now]
-            except IndexError:
-                self.now -= 1
-                return None
-            return next_song
-        else:
-            return None
-
-    def get_previous(self):
-        if not self.is_empty():
-            if self.now > 0:
-                self.now -= 1
-                try:
-                    previous_song = self.queue[self.now]
-                except IndexError:
-                    self.now += 1
-                    return None
-                return previous_song
-            else:
-                return None
-        else:
-            return None
-
-    def get_source(self, previous: bool = False):
-        if not self.is_empty():
-            if not previous:
-                try:
-                    return self.queue[self.now + 1]
-                except IndexError:
-                    return None
-            else:
-                try:
-                    if len(self.queue) != 1 and self.now > 0:
-                        try:
-                            return self.queue[self.now - 1]
-                        except IndexError:
-                            return None
-                    return None
-                except IndexError:
-                    return None
-        return None
-
-    def get_now_playing(self):
-        if not self.is_empty():
-            return self.queue[self.now]
-        else:
-            return None
-
-    def is_empty(self):
-        return len(self.queue) == 0
-
-    def clear(self):
-        self.queue = []
-        self.now = 0
 
 
 def create_embed(ctx: discord.ApplicationContext, player, mode: str) -> discord.Embed:
@@ -240,7 +171,7 @@ def create_embed(ctx: discord.ApplicationContext, player, mode: str) -> discord.
 
 async def play_next_song(ctx: discord.ApplicationContext) -> None:
     global trigger
-    player = queue.get_now_playing() if trigger else queue.get_next()
+    player = queue.current_item() if trigger else queue.next()
     if player:
         new_player, error = await YTDLSource.from_url(player.url, loop=bot.loop)
         if error:
@@ -267,7 +198,7 @@ async def play_next_song(ctx: discord.ApplicationContext) -> None:
 
 
 async def play_previous_song(ctx: discord.ApplicationContext) -> None:
-    player = queue.get_previous()
+    player = queue.previous()
     if player:
         new_player, error = await YTDLSource.from_url(player.url, loop=bot.loop)
         if error:
@@ -293,7 +224,7 @@ async def play_previous_song(ctx: discord.ApplicationContext) -> None:
 
 intents: discord.Intents = discord.Intents.all()
 bot: discord.Bot = discord.Bot(intents=intents)
-queue = MusicQueue()
+queue = Queue()
 trigger: bool = True
 
 
@@ -316,8 +247,8 @@ async def leave(ctx: discord.ApplicationContext) -> None:
             icon_url=ctx.author.avatar.url,  # type: ignore,
         )
         await ctx.respond(embed=embed)
-        await ctx.voice_client.disconnect()
-        MusicQueue.clear()
+        await ctx.voice_client.disconnect(force=True)
+        queue.clear()
         trigger = True
     else:
         embed = create_embed(ctx, "我還不在一個語音頻道。", "error")
@@ -372,7 +303,7 @@ async def play(
             await ctx.respond(embed=embed)
             return
 
-    queue.add_to_queue(player)
+    queue.add(player)
 
     if not ctx.voice_client.is_playing():
         await play_next_song(ctx)
