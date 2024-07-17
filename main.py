@@ -279,9 +279,11 @@ async def play(
     player, error = await YTDLSource.from_url(query, loop=bot.loop)
     if error:
         if error == "DRM":
+            domain = re.findall(r"https?://(?:www\.)?([^/]+\.com)", query)[0]
+
             embed = create_embed(
                 ctx,
-                f"該網站 [{re.findall(r'https?://(?:www\.)?([^/]+\.com)', query)[0]}]({query}) 含有DRM保護。",
+                f"該網站 [{domain}]({query}) 含有DRM保護。",
                 "error",
             )
             await ctx.respond(embed=embed)
@@ -308,16 +310,18 @@ async def play(
     if not ctx.voice_client.is_playing():
         await play_next_song(ctx)
 
-    if trigger or controller:
-        await ctx.respond(
-            embed=create_embed(ctx, player, "controller"),
-            view=Confirm(ctx),
-        )
-    else:
-        await ctx.respond(
-            embed=create_embed(ctx, player, "queue"),
-        )
-    trigger = False
+    if not error:
+        if trigger or controller:
+            await ctx.respond(
+                embed=create_embed(ctx, player, "controller"),
+                view=Confirm(ctx),
+            )
+            trigger = False
+            return
+        else:
+            await ctx.respond(embed=create_embed(ctx, player, "queue"))
+            trigger = False
+            return
 
 
 bot.run(os.getenv("TOKEN"))
